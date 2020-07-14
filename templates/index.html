@@ -1,0 +1,412 @@
+{% extends "layout.html" %}
+
+{% block content %}
+  <div class="container">
+      <div class="header">
+        <h3 class="text-muted">CBE Setpoint Savings Calculator</h3>
+      </div>
+
+      <div class="row">
+        <div class="col-sm-6" style="padding-top: 70px;">
+
+          <form class="form-inline">
+            <div class="input-inner" id="city-and-state-container">
+              <p class="input-label">City and state</p>
+              <div id="location-group" class="form-group">
+                <input type="text" style="width: 99%; margin: 0 auto;" class="form-control" id="city-and-state" value="Berkeley, CA">
+                <span id="checkmark" class="glyphicon glyphicon-ok" style="display: none;"></span>
+              </div>
+              <button type="button" style="margin: 10px auto;" id="update-location" class="btn btn-primary">Set Location</button>
+              <div id="county-climate-zone"></div>
+            </div>
+
+          </form>
+
+          <div class="input-inner">
+            <p class="input-label">Starting temperature setpoint range</p>
+            <span class="slider-left-label">64°F</span>
+            <input id="db0" type="text" class="span2" value="" 
+              data-slider-min="64" 
+              data-slider-max="86" 
+              data-slider-step="0.1" 
+              data-slider-value="[70,72]"
+              data-slider-handle="triangle"/>
+            <span class="slider-right-label">86°F</span>
+          </div>
+
+          <div class="input-inner">
+            <p class="input-label">Modified temperature setpoint range</p>
+            <span class="slider-left-label">64°F</span>
+            <input id="db1" type="text" class="span2" value="" 
+              data-slider-min="64" 
+              data-slider-max="86" 
+              data-slider-step="0.1" 
+              data-slider-value="[68,74]"
+              data-slider-handle="triangle"/>
+            <span class="slider-right-label">86°F</span>
+            <div style="width: 53%; margin: 0 auto; margin-top: 10px; display: none;" id="alert-success" class="alert alert-success"></div>
+            <div style="width: 53%; margin: 0 auto; margin-top: 10px; display: none;" id="alert-warning" class="alert alert-warning"></div>
+            <div style="width: 53%; margin: 0 auto; margin-top: 10px; display: none;" id="alert-danger" class="alert alert-danger"></div>
+          </div>
+
+        </div>
+
+        <div class="col-sm-6">
+          <div id="results"></div>
+        </div>
+
+      </div>
+      
+      <footer class="footer">
+        <p>&copy; 2015</p>
+      </footer>
+
+    </div> <!-- /container -->
+
+    <script>
+      $(document).ready(function(){
+
+        var db_sliders = $("#db0, #db1").slider({});
+
+        _.each(db_sliders, function(s){
+          s.on('slideStop', update_pie);
+        });
+
+        $("#city-and-state").on("focusout", update_pie);
+
+        $("#city-and-state").focus(function() {
+          $(this).data("hasfocus", true);
+        });
+
+        $("#city-and-state").blur(function() {
+          $(this).data("hasfocus", false);
+        });
+
+        $(document.body).keydown(function(event) {
+          if (event.which === 13 && $("#city-and-state").data("hasfocus")) {
+            event.preventDefault();
+            update_location(handle_location_update);
+          }
+        });
+
+        function trim(str){
+          return str.replace(/^\s\s*/, '').replace(/\s\s*$/, '');
+        }
+
+        function update_location(callback){
+          // add errbacks instead of "valid: false"
+
+          var city_and_state = $("#city-and-state").val().split(",");
+          if (city_and_state.length != 2) {
+            show_error("Input not valid.");
+          } else {
+            var city = trim(city_and_state[0]);
+            var state = trim(city_and_state[1]);
+            var url = "/climate?city=" + city + "&state=" + state;
+
+            $.ajax({
+              type: "GET",
+              url: url,
+              success: callback,
+            });
+          }
+        }
+
+        function init(res){
+          var r = JSON.parse(res);
+          if (r.valid){
+            window.climate = r.climate;
+            $("#county-climate-zone").html(r.county + " County, ASHRAE climate zone " + r.climate_zone + ".");
+          } else {
+            console.log("invalid starting location");
+          }
+          calculate(function(res_){
+            sum_total = parse_result(res_);
+            init_pie(sum_total, "total_results");
+          }, function(res_){
+            zero_pie();
+            show_error(res_.responseJSON.message);
+          });
+        }
+
+        function show_success(text){
+            var success_div = $("#alert-success")
+            success_div.html(text);
+            success_div.show("slow");
+            setTimeout(function(){
+              success_div.hide('slow'); 
+            }, 5000);
+        }
+
+        function show_warning(text){
+            var warning_div = $("#alert-warning");
+            warning_div.html(text);
+            warning_div.show('slow');
+            setTimeout(function(){
+              warning_div.hide('slow');
+            }, 5000);
+        }
+
+        function show_error(text){
+            var error_div = $("#alert-danger");
+            error_div.html(text);
+            error_div.show('slow');
+            setTimeout(function(){
+              error_div.hide('slow');
+            }, 5000);
+        }
+
+        function handle_location_update(res){
+          var r = JSON.parse(res);
+          if (r.valid){
+            window.climate = r.climate;
+            $("#location-group").removeClass('has-error');
+            $("#location-group").addClass('has-success');
+            $("#county-climate-zone").html(r.county + ' County, ASHRAE climate zone ' + r.climate_zone + '.');
+          } else {
+            $("#location-group").removeClass('has-success');
+            $("#location-group").addClass('has-error');
+            $("#county-climate-zone").html('');
+            show_error("Invalid city and state.");
+          }
+          update_pie();
+        };
+
+        function calculate(callback, errback){
+          var db0_range = db_sliders[0].slider('getValue');
+          var db1_range = db_sliders[1].slider('getValue');
+          var warn = false;
+          var warning = '';
+          if ((db0_range[0] > 70) || (db1_range[0] > 70)) {
+            warning += "Heating setpoints greater than 70&deg;F will be reduced to 70&deg;F.\n";
+            warn = true;
+          }
+          if ((db0_range[1] < 72) || (db1_range[1] < 72)) {
+            warning += "Cooling setpoints less than 72&deg;F will be increased to 72&deg;F.\n";
+            warn = true;
+          }
+          if (warn) show_warning(warning);
+          var url = "/api?climate=" + window.climate 
+            + "&hsp0=" + db0_range[0] + "&hsp1=" + db1_range[0]
+            + "&csp0=" + db0_range[1] + "&csp1=" + db1_range[1];
+            
+          $.ajax({
+            type: "GET",
+            url: url,
+            success: callback,
+            error: errback,
+          });
+        }
+
+        function parse_result(res){
+          var data = JSON.parse(res);
+          var sum_total = {};
+          sum_total.chart_data = _.extend({}, data.cooling.chart_data);
+          sum_total.table_data = _.extend({}, data.cooling.table_data);
+          _.each(data.heating.chart_data, function(val, key){
+            sum_total.chart_data[key] += val;          
+          });
+          _.each(data.heating.table_data, function(val, key){
+            sum_total.table_data[key] += val;          
+          });
+          return sum_total;
+        }
+
+        function get_chart_data(data){
+          var label_map = {
+            'fan_savings_per': 'Fan',
+            'central_heating_savings_per': 'Central heating',
+            'terminal_heating_savings_per': 'Terminal heating',
+            'cooling_savings_per': 'Cooling',
+            'hvac_consumption': 'HVAC consumption (after)'
+          };
+          var hvac_savings = _.reduce(data, function(v, memo){ return memo + v; });
+          data.hvac_consumption = 100 - hvac_savings;
+          var chart_data = _.map(data, function(val, key){ 
+            return {'label': label_map[key], 'value': val, 'key': key};
+          });
+          return chart_data;
+        }
+
+        function zero_pie(){
+          var zero = {
+            'fan_savings_per': 0, 
+            'central_heating_savings_per': 0, 
+            'terminal_heating_savings_per': 0, 
+            'cooling_savings_per': 0, 
+            'hvac_consumption': 0, 
+          }
+          var chart_data = get_chart_data(zero);
+          change(chart_data);
+          update_chart_table(chart_data);
+          var t = { 'electric_savings_per': 0, 'natural_gas_savings_per': 0 };
+          update_table(t);
+        }
+
+        function update_pie(){
+          calculate(function(res){
+            var data = parse_result(res);
+            var chart_data = get_chart_data(data.chart_data);
+            change(chart_data);
+            update_chart_table(chart_data);
+            update_table(data.table_data);
+          }, 
+          function(res){
+            zero_pie();
+            show_error(res.responseJSON.message);
+          });
+        }
+   
+        function update_table(table_data){
+          $('#electric_savings_per').html(table_data.electric_savings_per.toFixed(1));
+          $('#natural_gas_savings_per').html(table_data.natural_gas_savings_per.toFixed(1));
+        }
+
+        function update_chart_table(chart_data){
+          _.each(chart_data, function(d){
+            $('#' + d.key + '_value').html(d.value.toFixed(1));
+          });
+          var hvac_consumption = _.find(chart_data, function(d){
+            return d.key == 'hvac_consumption'
+          }).value;
+          var hvac_savings = 100 - hvac_consumption;
+          $('text#total-savings').html('Total HVAC savings: ' + hvac_savings.toFixed(1));
+          $('#total_hvac_savings').html(hvac_savings.toFixed(1));
+          if (hvac_savings == 0){
+            $('text#total-consumption').text('Total HVAC consumption (after): ' + hvac_consumption.toFixed(1) + " +");
+          } else {
+            $('text#total-consumption').text('Total HVAC consumption (after): ' + hvac_consumption.toFixed(1));
+          }
+        }
+
+        function change(chart_data) {
+          var pie = d3.layout.pie()
+            .startAngle(-Math.PI/2) 
+            .endAngle(Math.PI/2) 
+            .value(function(d) {
+              return d.value;
+            });
+          path.data(pie(chart_data));
+          path.transition().duration(750).attrTween("d", arcTween);
+        }
+
+        function arcTween(a) {
+          var i = d3.interpolate(this._current, a);
+          this._current = i(0);
+          return function(t) {
+            return arc(i(t));
+          };
+        }
+
+        function init_pie(data, container_id){
+
+          var hvac_savings = _.reduce(data.chart_data, function(v, memo){ return memo + v; });
+          var chart_data = get_chart_data(data.chart_data);
+          var outer_div = $("#results");
+          var div = $('<div id="' + container_id + '" class="results"></div>').appendTo(outer_div);
+
+          var width = 440;
+          var height = 250;
+          var ri = 70;
+          var ro = 200;
+
+          var color_range = ["#B9F1C0", "#87E192", "#5DCE6B", "#3CB94C", "#FF7A73"];
+          var color = d3.scale.ordinal()
+              .range(color_range);
+
+          arc = d3.svg.arc()
+            .outerRadius(ro)
+            .innerRadius(ri);
+
+          pie = d3.layout.pie()
+            .startAngle(-Math.PI/2) 
+            .endAngle(Math.PI/2) 
+            .value(function(d) {
+                return d.value;
+            });
+
+          svg = d3.select("#total_results").append("svg")
+            .attr("width", width)
+            .attr("height", height)
+            .append("g")
+            .attr("id", "results_pie")
+            .attr("transform", "translate(" + width / 2 + "," + height + ")");
+
+          path = svg.selectAll("path")
+            .data(pie(chart_data))
+            .enter()
+            .append("path")
+            .attr("fill", "#ffffff")
+
+          path.transition()
+            .duration(1000)
+            .attr("fill", function(d, i) {
+              return color(i);
+            })
+            .attr("d", arc)
+            .each(function(d) {
+              this._current = d;
+            }); 
+
+          svg.append("g")
+            .attr("class", "labels");
+
+          var labels = svg.select(".labels")
+
+          labels.append("text")
+            .attr("x", -220)
+            .attr("y", -200)
+            .attr('id', 'total-savings')
+
+          labels.append("text")
+            .attr("x", -220)
+            .attr("y", -220)
+            .attr('id', 'total-consumption')
+
+          labels.append("text")
+            .attr("x", -220)
+            .attr("y", -210)
+            
+          chart_data = _.filter(chart_data, function(e){
+              return e.key != "hvac_consumption";
+          });
+
+          var table = $('<table class="table results-table"></table>').appendTo(div);
+          table.append('<thead><tr><th></th><th>Category</th><th style="text-align:center;">%</th></tr></thead>');
+
+          table.append('<tbody>');
+          table.append('<tr><td style="text-align:center"><span class="glyphicon glyphicon-chevron-down"> \
+          </span></td><td style="text-align:left">HVAC savings breakdown</td><td></td></tr>');
+                  
+          _.each(chart_data, function(d, i){
+            table.append('<tr><td style="background-color:' + color(i) + 
+                      '; width: 27px; height: 37px;"' + '</td><td style="text-align:left;">' 
+                      + d.label + '</td><td id="' + d.key + '_value">' + d.value.toFixed(1) + '</td></tr></tbody>');
+          });
+
+          table.append('<tr><td></td><td style="text-align:left; font-weight: bold;">Total</td> \
+              <td style="font-weight: bold" id="total_hvac_savings">' + 
+                  hvac_savings.toFixed(1) + '</td></tr>');
+
+          var table_details = $('<tbody id="table-details" style="display:none"></tbody>').appendTo(table);
+          table_details.append('<tr><td><span class="glyphicon glyphicon-fire"></span></td> \
+              <td style="text-align: left;">Natural gas savings</td> \
+              <td style="text-align: center;" id="natural_gas_savings_per">' + 
+              data.table_data.natural_gas_savings_per.toFixed(1) + '</td></tr>');
+
+          table_details.append('<tr><td><span class="glyphicon glyphicon-flash"></span></td> \
+              <td style="text-align: left">Electricity savings</td> \
+              <td style="text-align: center;" id="electric_savings_per">' +
+              data.table_data.electric_savings_per.toFixed(1) + '</td></tr>');
+        }
+
+        $("#update-location").click(function(){
+          update_location(handle_location_update);
+        });
+        update_location(init);
+
+      });
+
+    </script>
+
+{% endblock %}
