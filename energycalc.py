@@ -1,5 +1,6 @@
 from flask import Flask, request, render_template, jsonify
 from model import EnergyCalcModel
+import pandas as pd
 import json
 import requests
 import requests_cache
@@ -11,26 +12,16 @@ app = Flask(__name__)
 def FtoC(f):
     return (f - 32) * 5 / 9
 
-f = open('db/climate_zones.json', 'r')
-ASHRAE_DATA = json.load(f)
-f.close()
+CLIMATE_ZONE_SUBTYPE_C = ['Alameda','Marin','Mendocino','Monterey','Napa','San Benito','San Francisco','San Luis Obispo','San Mateo','Santa Barbara','Santa Clara','Santa Cruz','Sonoma','Ventura']
 
 CLIMATE_ZONE_MAP = {
-    '1A': 'Miami',
-    '1B': 'Miami',
-    '2A': 'Phoenix',
-    '2B': 'Phoenix',
-    '3A': 'Fresno',
-    '3B': 'Fresno',
+    '1': 'Miami',
+    '2': 'Phoenix',
+    '3': 'Fresno',
     '3C': 'San Francisco',
-    '4A': 'Baltimore',
-    '4B': 'Baltimore',
-    '4C': 'Baltimore',
-    '5A': 'Chicago',
-    '5B': 'Chicago',
-    '5C': 'Chicago',
-    '6A': 'Duluth',
-    '6B': 'Duluth',
+    '4': 'Baltimore',
+    '5': 'Chicago',
+    '6': 'Duluth',
     '7': 'Duluth',
     '8': 'Duluth'
 }
@@ -65,34 +56,24 @@ def calculate():
 
     return json.dumps(rv)
 
-def get_county(city, state):
-    url = "http://api.sba.gov/geodata/city_links_for_state_of/%s.json" % state.lower()
-    r = requests.get(url)
-    state_data = json.loads(r.text)
-    try:
-        city_data = filter(lambda c: c['name'].lower() == city.lower(), state_data).pop()
-        return city_data['county_name']
-    except IndexError:
-        return None
-
 def get_climate_zone(state, county):
-    state_data = filter(lambda s: s['state'] == state.upper(), ASHRAE_DATA).pop()
-    exception = filter(lambda ex: ex['county'] == county, state_data['exceptions'])
-    if exception:
-        return exception[0]['climate_zone']
-    else:
-        return state_data['climate_zone']
+    df = pd.read_csv("db/climateByCounty.csv")
+    countyState = county + ", " + state
+    climateZone = df[df['County'] == countyState]['Climate zone'].values[0]
+
+    return climateZone
 
 @app.route('/climate')
 def climate():
     # curl localhost:5000/climate?state=MA&city=Boston
     state = request.args.get('state')
-    city = request.args.get('city')
-    county = get_county(city, state)
+    county = request.args.get('county')
+
     if county is None:
         return json.dumps({'valid': False})
     else:
-        climate_zone = get_climate_zone(state, county)
+        if(county in CLIMATE_ZONE_SUBTYPE_C): climate_zone = '3C'
+        else: climate_zone = str(get_climate_zone(state, county))
         climate = CLIMATE_ZONE_MAP[climate_zone]
         rv = { 'valid': True, 'county': county, 'climate_zone': climate_zone, 'climate': climate } 
         return json.dumps(rv)
