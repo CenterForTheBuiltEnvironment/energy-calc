@@ -1,14 +1,14 @@
 from flask import Flask, request, render_template, jsonify
 from model import EnergyCalcModel
 import json
-import requests
 import requests_cache
+import pandas as pd
 
 requests_cache.install_cache('sba_cache')
 
 app = Flask(__name__)
 
-def FtoC(f):
+def f_to_c(f):
     return (f - 32) * 5 / 9
 
 f = open('db/climate_zones.json', 'r')
@@ -45,10 +45,10 @@ def calculate():
 
     e = EnergyCalcModel()
 
-    csp0 = FtoC(float(request.args.get('csp0')))
-    csp1 = FtoC(float(request.args.get('csp1')))
-    hsp0 = FtoC(float(request.args.get('hsp0')))
-    hsp1 = FtoC(float(request.args.get('hsp1')))
+    csp0 = f_to_c(float(request.args.get('csp0')))
+    csp1 = f_to_c(float(request.args.get('csp1')))
+    hsp0 = f_to_c(float(request.args.get('hsp0')))
+    hsp1 = f_to_c(float(request.args.get('hsp1')))
     climate = request.args.get('climate')
 
     if (csp0 > csp1 or hsp0 < hsp1):
@@ -66,18 +66,20 @@ def calculate():
     return json.dumps(rv)
 
 def get_county(city, state):
-    url = "http://api.sba.gov/geodata/city_links_for_state_of/%s.json" % state.lower()
-    r = requests.get(url)
-    state_data = json.loads(r.text)
+    df_us = pd.read_csv("db/uscities.csv")
+    df_us.city = df_us.city.str.lower()
+    df_us.state_id = df_us.state_id.str.lower()
+
     try:
-        city_data = filter(lambda c: c['name'].lower() == city.lower(), state_data).pop()
-        return city_data['county_name']
+        county = df_us.loc[(df_us.city == city.lower()) & (df_us.state_id == state.lower()), "county_name"].values[
+            0]
+        return county
     except IndexError:
         return None
 
 def get_climate_zone(state, county):
-    state_data = filter(lambda s: s['state'] == state.upper(), ASHRAE_DATA).pop()
-    exception = filter(lambda ex: ex['county'] == county, state_data['exceptions'])
+    state_data = list(filter(lambda s: s['state'] == state.upper(), ASHRAE_DATA)).pop()
+    exception = list(filter(lambda ex: ex['county'] == county, state_data['exceptions']))
     if exception:
         return exception[0]['climate_zone']
     else:
@@ -96,10 +98,6 @@ def climate():
         climate = CLIMATE_ZONE_MAP[climate_zone]
         rv = { 'valid': True, 'county': county, 'climate_zone': climate_zone, 'climate': climate } 
         return json.dumps(rv)
-
-@app.route('/detail')
-def detail():
-    pass
 
 class InvalidUsage(Exception):
     status_code = 400
@@ -123,4 +121,4 @@ def handle_invalid_usage(error):
     return response
 
 if __name__ == '__main__':
-    app.run()
+    app.run(debug=True)

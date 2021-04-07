@@ -11,25 +11,26 @@ class EnergyCalcModel:
     __vintages__ = ['Existing', 'New']
 
     def __init__(self):
-        self.db = pickle.load(open(__pickle_file__))
+        file = open(__pickle_file__, 'rb')
+        self.db = pickle.load(file)
 
     def filter_db(self, climate_zone, vav_type, vintage, vav_fixed):
-        db = filter(lambda r: r['climate'] == climate_zone, self.db)
+        db = list(filter(lambda r: r['climate'] == climate_zone, self.db))
         system_type = vav_type + vintage + ('VAVFixed' if vav_fixed else 'VAVAuto')
-        db = filter(lambda r: r['type'] == system_type, db)
+        db = list(filter(lambda r: r['type'] == system_type, db))
         return db
 
     def pluck_and_interpolate(self, db):
-        hsp = map(lambda r: float(r['heating_sp']), db)
-        csp = map(lambda r: float(r['cooling_sp']), db)
+        hsp = list(map(lambda r: float(r['heating_sp']), db))
+        csp = list(map(lambda r: float(r['cooling_sp']), db))
         x = hsp
         x[11:] = csp[11:]
-        terminal_heating = map(lambda r: r['terminal_heating'], db)
+        terminal_heating = [x['terminal_heating'] for x in db]
         self.f_terminal_heating = interp1d(x, terminal_heating)
-        self.f_central_heating = interp1d(x, map(lambda r: r['central_heating'], db))
-        self.f_cooling = interp1d(x, map(lambda r: r['cooling'], db))
-        self.f_fans = interp1d(x, map(lambda r: r['fans'], db))
-        self.f_hvac = interp1d(x, map(lambda r: r['hvac'], db))
+        self.f_central_heating = interp1d(x, [x['central_heating'] for x in db])
+        self.f_cooling = interp1d(x, [x['cooling'] for x in db])
+        self.f_fans = interp1d(x,[x['fans'] for x in db])
+        self.f_hvac = interp1d(x, [x['hvac'] for x in db])
 
     def calculate(self, sp0, sp1, climate_zone, vav_type, vintage, vav_fixed, cool_side, verbose=False):
 
@@ -53,8 +54,8 @@ class EnergyCalcModel:
         if verbose:
             increasing = 'increasing' if (sp0 < sp1) else 'decreasing'
             cooling_sp = 'cooling' if cool_side else 'heating'
-            print "Savings from %s the %s from %s to %s" % (increasing, cooling_sp, sp0, sp1)
-            print "-" * 40
+            print( "Savings from %s the %s from %s to %s" % (increasing, cooling_sp, sp0, sp1))
+            print ("-" * 40)
 
         return self.savings(sp0, sp1, verbose)
 
@@ -85,15 +86,14 @@ class EnergyCalcModel:
         electric_savings_per = 100 * (electric_0 - electric_1) / electric_0
 
         if verbose:
-            print "total hvac savings: %s %%" % hvac_savings_per
-            print "breakdown:"
-            print "terminal heating savings: %s %%" % terminal_heating_savings_per
-            print "central heating savings: %s %%" % central_heating_savings_per
-            print "cooling savings: %s %%" % cooling_savings_per
-            print "fan savings: %s %%" % fan_savings_per
-            print "natural gas savings: %s %%" % natural_gas_savings_per
-            print "electricity savings: %s %%" % electric_savings_per 
-            print
+            print( "total hvac savings: %s %%" % hvac_savings_per)
+            print( "breakdown:")
+            print( "terminal heating savings: %s %%" % terminal_heating_savings_per)
+            print( "central heating savings: %s %%" % central_heating_savings_per)
+            print( "cooling savings: %s %%" % cooling_savings_per)
+            print( "fan savings: %s %%" % fan_savings_per)
+            print( "natural gas savings: %s %%" % natural_gas_savings_per)
+            print( "electricity savings: %s %%" % electric_savings_per)
 
         rv = {'chart_data': {
                 'terminal_heating_savings_per': terminal_heating_savings_per,
