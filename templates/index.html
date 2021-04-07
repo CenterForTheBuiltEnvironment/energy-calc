@@ -6,34 +6,27 @@
 
   <div class="row">
     <div class="col-sm-6" style="padding-top: 70px;">
-      <form class="form-inline">
-        <div class="input-inner" id="city-and-state-container">
-          <p class="input-label">City and state</p>
-          <div id="location-group" class="form-group">
-            <input
-              type="text"
-              style="width: 99%; margin: 0 auto;"
-              class="form-control"
-              id="city-and-state"
-              value="Berkeley, CA"
-            />
-            <span
-              id="checkmark"
-              class="glyphicon glyphicon-ok"
-              style="display: none;"
-            ></span>
+      <div class="input-inner" id="city-and-state-container">
+        <form>
+          <div class="mb-3">
+            <label>Select a US state:</label>
+            {{ form.state }}
           </div>
-          <button
-            type="button"
-            style="margin: 10px auto;"
-            id="update-location"
-            class="btn btn-primary"
-          >
-            Set Location
-          </button>
-          <div id="county-climate-zone"></div>
-        </div>
-      </form>
+          <div class="mb-3">
+            <label>Select a city:</label>
+            {{ form.city }}
+          </div>
+        </form>
+        <button
+          type="button"
+          style="margin: 10px auto;"
+          id="update-location"
+          class="btn btn-primary"
+        >
+          Set Location
+        </button>
+        <div id="county-climate-zone"></div>
+      </div>
 
       <div class="input-inner">
         <p class="input-label">Starting temperature setpoint range</p>
@@ -102,6 +95,26 @@
 <!-- /container -->
 
 <script>
+  const stateSelect = document.getElementById("state");
+  const citySelect = document.getElementById("city");
+
+  stateSelect.onchange = function () {
+    const state = stateSelect.value;
+    console.log(state);
+    fetch("/city/" + state).then((response) => {
+      response.json().then((data) => {
+        console.log(data);
+        let optionHTML = "";
+        for (let city of data.cities) {
+          optionHTML +=
+            '<option value="' + city.id + '">' + city.name + "</option>";
+        }
+
+        citySelect.innerHTML = optionHTML;
+      });
+    });
+  };
+
   $(document).ready(function () {
     var db_sliders = $("#db0, #db1").slider({});
 
@@ -128,27 +141,17 @@
       }
     });
 
-    function trim(str) {
-      return str.replace(/^\s\s*/, "").replace(/\s\s*$/, "");
-    }
-
     function update_location(callback) {
-      // add errbacks instead of "valid: false"
+      const city = citySelect.value;
+      const state = stateSelect.value;
 
-      var city_and_state = $("#city-and-state").val().split(",");
-      if (city_and_state.length !== 2) {
-        show_error("Input not valid.");
-      } else {
-        var city = trim(city_and_state[0]);
-        var state = trim(city_and_state[1]);
-        var url = "/climate?city=" + city + "&state=" + state;
+      const url = "/climate?city=" + city + "&state=" + state;
 
-        $.ajax({
-          type: "GET",
-          url: url,
-          success: callback,
-        });
-      }
+      $.ajax({
+        type: "GET",
+        url: url,
+        success: callback,
+      });
     }
 
     function init(res) {

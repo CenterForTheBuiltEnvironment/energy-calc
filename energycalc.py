@@ -1,12 +1,18 @@
 from flask import Flask, request, render_template, jsonify
+from flask_wtf import FlaskForm
+from wtforms import SelectField
 from model import EnergyCalcModel
 import json
 import requests_cache
 import pandas as pd
+import os
+
+SECRET_KEY = os.urandom(32)
 
 requests_cache.install_cache("sba_cache")
 
 app = Flask(__name__)
+app.config["SECRET_KEY"] = SECRET_KEY
 
 
 def f_to_c(tmp_f):
@@ -16,6 +22,11 @@ def f_to_c(tmp_f):
 f = open("db/climate_zones.json", "r")
 ASHRAE_DATA = json.load(f)
 f.close()
+
+df_us = pd.read_csv("db/uscities.csv")
+# todo allow the user to select minimum population
+df_us = df_us[df_us.population > 100000]
+default_state_id = "NY"
 
 CLIMATE_ZONE_MAP = {
     "1A": "Miami",
@@ -40,7 +51,40 @@ CLIMATE_ZONE_MAP = {
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    form = Form()
+
+    city_choices = df_us.loc[df_us.state_id == default_state_id, "city"]
+
+    form.city.choices = [(city, city) for city in city_choices]
+
+    return render_template("index.html", form=form)
+
+
+@app.route("/city/<state>")
+def city(state):
+    city_choices = df_us.loc[df_us.state_id == state, "city"]
+
+    city_array = []
+    for city in city_choices:
+        city_object = {"id": city, "name": city}
+        city_array.append(city_object)
+
+    return jsonify({"cities": city_array})
+
+
+class Form(FlaskForm):
+
+    state_choices = df_us[["state_id", "state_name"]].drop_duplicates().sort_index()
+    state_choices = list(zip(state_choices["state_id"], state_choices["state_name"]))
+
+    state = SelectField(
+        "state",
+        choices=state_choices,
+    )
+
+    city_choices = df_us.loc[df_us.state_id == default_state_id, "city"]
+
+    city = SelectField("state", choices=[(city, city) for city in city_choices])
 
 
 @app.route("/api")
@@ -78,13 +122,9 @@ def calculate():
 
 
 def get_county(city, state):
-    df_us = pd.read_csv("db/uscities.csv")
-    df_us.city = df_us.city.str.lower()
-    df_us.state_id = df_us.state_id.str.lower()
-
     try:
         county = df_us.loc[
-            (df_us.city == city.lower()) & (df_us.state_id == state.lower()),
+            (df_us.city == city) & (df_us.state_id == state),
             "county_name",
         ].values[0]
         return county

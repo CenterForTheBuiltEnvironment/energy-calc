@@ -1,4 +1,5 @@
 Flask==1.1.2
+Flask-WTF
 Jinja2==2.11.3
 MarkupSafe==1.1.1
 Werkzeug==1.0.1
