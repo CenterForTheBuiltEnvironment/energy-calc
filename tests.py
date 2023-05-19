@@ -1,4 +1,4 @@
-import energycalc
+import main
 import unittest
 import json
 
